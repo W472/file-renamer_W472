@@ -1,0 +1,374 @@
+<!-- frontend/index.html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <title>文件批量重命名工具</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f0f2f5;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      margin-bottom: 20px;
+      color: #333;
+    }
+
+    .path-input {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .path-input input {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      font-size: 16px;
+    }
+
+    button {
+      padding: 10px 20px;
+      background: #4a6cf7;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    button:hover {
+      background: #3b5de7;
+    }
+
+    .rule-section {
+      border: 1px solid #eee;
+      padding: 15px;
+      border-radius: 5px;
+      margin-bottom: 20px;
+    }
+
+    .rule-section h3 {
+      margin-bottom: 10px;
+    }
+
+    .rule-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .rule-row label {
+      font-weight: bold;
+      min-width: 80px;
+    }
+
+    select,
+    input[type="text"],
+    input[type="number"] {
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    .file-list {
+      margin-top: 20px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    th,
+    td {
+      padding: 10px;
+      border-bottom: 1px solid #ddd;
+      text-align: left;
+    }
+
+    th {
+      background: #f8f9fa;
+    }
+
+    .conflict {
+      color: red;
+      font-weight: bold;
+    }
+
+    .success {
+      color: green;
+    }
+
+    .error {
+      color: red;
+    }
+
+    .preview-actions {
+      margin-top: 15px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .result {
+      margin-top: 20px;
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>📁 文件批量重命名工具</h1>
+
+    <!-- 目录输入 -->
+    <div class="path-input">
+      <input type="text" id="dirPath" placeholder="请输入文件夹绝对路径，如 /home/user/docs" value="">
+      <button onclick="loadFiles()">加载文件</button>
+    </div>
+
+    <!-- 规则选择 -->
+    <div class="rule-section">
+      <h3>⚙️ 重命名规则</h3>
+      <div class="rule-row">
+        <label>规则类型：</label>
+        <select id="ruleType" onchange="onRuleChange()">
+          <option value="add_prefix">添加前缀</option>
+          <option value="add_suffix">添加后缀</option>
+          <option value="replace">文本替换</option>
+          <option value="regex_replace">正则替换</option>
+          <option value="numbering">数字编号</option>
+        </select>
+        <label><input type="checkbox" id="keepExt" checked> 保留扩展名</label>
+      </div>
+      <!-- 动态规则参数区域 -->
+      <div id="ruleParams" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- 预览按钮 -->
+    <button onclick="previewRename()" style="margin-bottom:15px;">👁️ 预览重命名</button>
+
+    <!-- 文件列表表格 -->
+    <div class="file-list">
+      <table id="fileTable">
+        <thead>
+          <tr>
+            <th>原文件名</th>
+            <th>新文件名</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- 执行按钮 -->
+    <div class="preview-actions">
+      <button onclick="executeRename()">🚀 执行重命名</button>
+      <span id="msg" style="margin-left:10px;"></span>
+    </div>
+
+    <!-- 执行结果 -->
+    <div id="resultBox" class="result" style="display:none;"></div>
+  </div>
+
+  <script>
+    let currentFiles = [];           // 当前目录的文件名数组
+    let currentPath = '';           // 当前绝对路径
+    let previewData = [];           // 预览结果 [{old, new, conflict}]
+
+    // 初始化默认规则UI
+    onRuleChange();
+
+    function onRuleChange() {
+      const type = document.getElementById('ruleType').value;
+      const paramsDiv = document.getElementById('ruleParams');
+      let html = '';
+      switch (type) {
+        case 'add_prefix':
+          html = '<label>前缀内容：</label><input type="text" id="prefixVal" placeholder="如 new_">';
+          break;
+        case 'add_suffix':
+          html = '<label>后缀内容：</label><input type="text" id="suffixVal" placeholder="如 _backup">';
+          break;
+        case 'replace':
+          html = '<label>查找文本：</label><input type="text" id="oldText" placeholder="旧文本">';
+          html += '<label>替换为：</label><input type="text" id="newText" placeholder="新文本">';
+          break;
+        case 'regex_replace':
+          html = '<label>正则表达式：</label><input type="text" id="regexPattern" placeholder="如 [0-9]+">';
+          html += '<label>替换为：</label><input type="text" id="regexRepl" placeholder="数字">';
+          break;
+        case 'numbering':
+          html = '<label>起始数字：</label><input type="number" id="numStart" value="1" min="0">';
+          html += '<label>位数(补零)：</label><input type="number" id="numDigits" value="3" min="1">';
+          html += '<label>前缀：</label><input type="text" id="numPrefix" placeholder="如 file_">';
+          break;
+      }
+      paramsDiv.innerHTML = html;
+    }
+
+    async function loadFiles() {
+      const dirPath = document.getElementById('dirPath').value.trim();
+      if (!dirPath) return alert('请输入文件夹路径');
+      try {
+        const resp = await fetch(`http://localhost:5000/api/files?path=${encodeURIComponent(dirPath)}`);
+        const data = await resp.json();
+        if (data.error) {
+          alert('错误：' + data.error);
+          return;
+        }
+        currentPath = data.path;
+        currentFiles = data.files;
+        // 清空表格，显示原文件名
+        renderTable(currentFiles.map(f => ({ old: f, new: '', conflict: false })));
+        document.getElementById('dirPath').value = currentPath;  // 回显完整路径
+      } catch (e) {
+        alert('请求失败：' + e.message);
+      }
+    }
+
+    function renderTable(dataArray) {
+      const tbody = document.querySelector('#fileTable tbody');
+      tbody.innerHTML = dataArray.map(item => `
+    <tr>
+      <td>${escapeHtml(item.old)}</td>
+      <td class="${item.conflict ? 'conflict' : ''}">${escapeHtml(item.new || '（未预览）')}</td>
+      <td>${item.conflict ? '<span class="conflict">冲突</span>' : ''}</td>
+    </tr>
+  `).join('');
+    }
+
+    function escapeHtml(text) {
+      return String(text).replace(/[&<>"']/g, function (m) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
+      });
+    }
+
+    // 构造规则对象
+    function getRule() {
+      const type = document.getElementById('ruleType').value;
+      const keepExt = document.getElementById('keepExt').checked;
+      let rule = { type, keep_ext: keepExt };
+
+      switch (type) {
+        case 'add_prefix':
+          rule.value = document.getElementById('prefixVal')?.value || '';
+          break;
+        case 'add_suffix':
+          rule.value = document.getElementById('suffixVal')?.value || '';
+          break;
+        case 'replace':
+          rule.old_text = document.getElementById('oldText')?.value || '';
+          rule.new_text = document.getElementById('newText')?.value || '';
+          break;
+        case 'regex_replace':
+          rule.pattern = document.getElementById('regexPattern')?.value || '';
+          rule.replacement = document.getElementById('regexRepl')?.value || '';
+          break;
+        case 'numbering':
+          rule.start = parseInt(document.getElementById('numStart')?.value) || 1;
+          rule.digits = parseInt(document.getElementById('numDigits')?.value) || 3;
+          rule.prefix = document.getElementById('numPrefix')?.value || '';
+          // 预览时索引从0开始
+          break;
+      }
+      return rule;
+    }
+
+    async function previewRename() {
+      if (currentFiles.length === 0) return alert('请先加载文件');
+      const rule = getRule();
+      // 如果是编号规则，需要为每个文件设置索引
+      let filesForPreview = [...currentFiles];
+      if (rule.type === 'numbering') {
+        // 后端需要index字段，我们在请求体中为每个文件附加索引
+        // 但是当前API设计是接收files数组和rule，后端没有单独接收索引，需要修改。
+        // 简便方式：前端将文件列表改为对象数组 [{name, index}]
+        // 或者直接修改请求，将files改为包含索引的对象。
+        // 为了不修改已写好的后端apply_rule，后端预览API中会根据files数组中的元素如果是字符串就取索引。
+        // 我们现在快速调整：发送时，对每个文件构造{name, index}
+      }
+      try {
+        const resp = await fetch('http://localhost:5000/api/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            path: currentPath,
+            files: filesForPreview.map((f, idx) => ({ name: f, index: idx })),
+            rule: rule
+          })
+        });
+        const data = await resp.json();
+        if (data.error) {
+          alert('预览错误：' + data.error);
+          return;
+        }
+        previewData = data.preview;
+        renderTable(previewData);
+      } catch (e) {
+        alert('预览请求失败：' + e.message);
+      }
+    }
+
+    async function executeRename() {
+      if (previewData.length === 0) return alert('请先预览');
+      // 检查冲突
+      const conflicts = previewData.filter(item => item.conflict);
+      if (conflicts.length > 0 && !confirm(`有 ${conflicts.length} 个文件存在冲突，是否继续？`)) {
+        return;
+      }
+      try {
+        const resp = await fetch('http://localhost:5000/api/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            path: currentPath,
+            renames: previewData.map(item => ({ old: item.old, new: item.new }))
+          })
+        });
+        const data = await resp.json();
+        showResults(data.results);
+        // 执行后重新加载文件列表
+        loadFiles();
+        previewData = [];
+      } catch (e) {
+        alert('执行失败：' + e.message);
+      }
+    }
+
+    function showResults(results) {
+      const box = document.getElementById('resultBox');
+      box.style.display = 'block';
+      box.innerHTML = '<h4>执行结果：</h4>' + results.map(r =>
+        `<p class="${r.status === 'success' ? 'success' : 'error'}">${escapeHtml(r.old)} → ${escapeHtml(r.new)} : ${r.msg}</p>`
+      ).join('');
+    }
+  </script>
+</body>
+
+</html>
